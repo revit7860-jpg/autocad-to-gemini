@@ -560,16 +560,24 @@ class GeminiWebBot:
                 return ""
 
     def _is_generating(self):
-        """Vrai si Gemini genere encore (bouton stop visible / spinner)."""
+        """Vrai si Gemini genere encore (bouton stop visible / spinner visible).
+
+        Seuls les elements AFFICHES comptent : un spinner cache dans le DOM
+        ne doit pas bloquer les runs suivants. Inclut le libelle francais
+        'arreter la reponse' (avec et sans accent)."""
         try:
             return bool(self.driver.execute_script(
                 "var btns=document.querySelectorAll('button,[role=\"button\"]');"
                 "for(var i=0;i<btns.length;i++){"
                 " var t=((btns[i].getAttribute('aria-label')||'')+' '+(btns[i].getAttribute('title')||'')).toLowerCase();"
-                " if(t.indexOf('stop gener')>=0||t.indexOf('stop respond')>=0||t.indexOf('arreter')>=0||t.indexOf('stop')>=0){"
+                " if(t.indexOf('stop gener')>=0||t.indexOf('stop respond')>=0||t.indexOf('arreter')>=0||t.indexOf('arr\\u00eater')>=0||t.indexOf('stop')>=0){"
                 "  var r=btns[i].getBoundingClientRect();"
                 "  if(r.width>0&&r.height>0) return true;}}"
-                "return !!document.querySelector('mat-progress-spinner,mat-spinner');"))
+                "var sp=document.querySelectorAll('mat-progress-spinner,mat-spinner');"
+                "for(var j=0;j<sp.length;j++){"
+                " var q=sp[j].getBoundingClientRect();"
+                " if(q.width>0&&q.height>0) return true;}"
+                "return false;"))
         except Exception:
             return False
 
