@@ -4,6 +4,7 @@ __pycache__/
 *.rar
 *.zip
 presets.avant-renfort-*.json
+presets.renfort-v1-*.json
  Lomax111@prov.com/
 .venv/
 venv/
