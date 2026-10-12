@@ -50,6 +50,8 @@ Meme principe que l'outil 3ds Max (`GeminiStudio`), adapte a AutoCAD.
 4. Choisissez un type de rendu + ajustez le prompt, puis **3. Generer le rendu**.
 5. **Inserer dans AutoCAD** pour poser le rendu dans le dessin
    (ou commande `AIRENDERINS`).
+   L'aperçu est préparé en arrière-plan avec un redimensionnement rapide et
+   l'insertion AutoCAD ne bloque plus l'interface.
 
 ## Dossiers
 

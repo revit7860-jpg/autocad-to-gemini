@@ -66,6 +66,7 @@ class RenderApp:
         self.var_insert_scale = tk.StringVar(value="1.0")
         self._photo_plan = None
         self._photo_render = None
+        self._preview_request = {"_photo_plan": 0, "_photo_render": 0}
 
         root.title("AutoCAD \u2194 Gemini Render")
         root.geometry("1080x760")
@@ -259,15 +260,39 @@ class RenderApp:
     def _show_image(self, path, attr):
         if Image is None or not os.path.isfile(path):
             return
+        self._preview_request[attr] = self._preview_request.get(attr, 0) + 1
+        request_id = self._preview_request[attr]
+
+        def prepare_thumbnail():
+            try:
+                with Image.open(path) as source:
+                    source.thumbnail(
+                        (480, 380),
+                        resample=Image.Resampling.BILINEAR,
+                        reducing_gap=3.0,
+                    )
+                    preview = source.copy()
+                # Les objets ImageTk/Tk sont créés exclusivement sur le thread UI.
+                self.root.after(0, lambda: self._apply_preview(preview, attr, request_id))
+            except Exception as e:
+                try:
+                    self.root.after(0, lambda message=str(e): self.log("Apercu impossible: %s" % message))
+                except Exception:
+                    pass
+
+        threading.Thread(target=prepare_thumbnail, name="preview-thumbnail", daemon=True).start()
+
+    def _apply_preview(self, image, attr, request_id):
+        """Applique uniquement la dernière miniature demandée pour ce panneau."""
+        if self._closing or request_id != self._preview_request.get(attr):
+            return
         try:
-            img = Image.open(path)
-            img.thumbnail((480, 380))
-            photo = ImageTk.PhotoImage(img)
+            photo = ImageTk.PhotoImage(image)
             setattr(self, attr, photo)
             widget = self.can_plan if attr == "_photo_plan" else self.can_render
             widget.config(image=photo, text="")
         except Exception as e:
-            self.log("Apercu impossible: %s" % e)
+            self.log("Affichage de l'apercu impossible: %s" % e)
 
     def open_folder(self):
         try:
@@ -416,21 +441,37 @@ class RenderApp:
         threading.Thread(target=run, daemon=True).start()
 
     def _on_gen_done(self, ok, res, scale):
-        self._set_busy(False)
-        if ok:
-            self.log("Rendu genere: %s" % res)
-            self._show_image(self.render_path, "_photo_render")
+        if not ok:
+            self._set_busy(False)
+            self.log("Echec: %s" % res)
+            return
+
+        # Afficher l'aperçu dès que le fichier est prêt. La lecture/redimension
+        # et l'insertion AutoCAD s'effectuent hors du thread Tk.
+        self.log("Rendu prêt : affichage de l'aperçu et insertion dans AutoCAD...")
+        self._show_image(self.render_path, "_photo_render")
+
+        def insert_in_background():
             try:
                 ok2, msg2 = acad.insert_render(self.render_path, scale=scale)
-                self.log(msg2)
             except Exception as e:
-                self.log("Insertion impossible: %s" % e)
+                ok2, msg2 = False, "Insertion impossible: %s" % e
             try:
                 acad.ensure_visible()
             except Exception:
                 pass
-        else:
-            self.log("Echec: %s" % res)
+            try:
+                self.root.after(0, lambda: self._on_insert_done(ok2, msg2))
+            except Exception:
+                pass
+
+        threading.Thread(target=insert_in_background, name="autocad-insert", daemon=True).start()
+
+    def _on_insert_done(self, ok, message):
+        self._set_busy(False)
+        self.log(message)
+        if ok:
+            self.log("Le rendu est prêt dans AutoCAD.")
 
     def do_insert(self):
         if not os.path.isfile(self.render_path):
@@ -439,8 +480,20 @@ class RenderApp:
         scale = self._get_insert_scale()
         if scale is None:
             return
-        ok, msg = acad.insert_render(self.render_path, scale=scale)
-        self.log(msg)
+        self._set_busy(True)
+
+        def run():
+            try:
+                ok, msg = acad.insert_render(self.render_path, scale=scale)
+                acad.ensure_visible()
+            except Exception as e:
+                ok, msg = False, "Insertion impossible: %s" % e
+            try:
+                self.root.after(0, lambda: self._on_insert_done(ok, msg))
+            except Exception:
+                pass
+
+        threading.Thread(target=run, name="autocad-insert", daemon=True).start()
 
     # ------------------------------------------------------------------ monitor
     def _monitor(self):

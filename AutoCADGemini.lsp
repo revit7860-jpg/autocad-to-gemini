@@ -12,7 +12,7 @@
 
 ;; Dossier de l'application : resolu via findfile (voir ag:dir).
 ;; Repli manuel si findfile echoue : renseignez votre chemin ici (slashes /).
-(setq *AG-ROOT* "")
+(setq *AG-ROOT* "C:/Users/PROMOTECH/Downloads/script gemini to 3dsmax/AutoCADGemini")
 ;; Interpreteur Python : "pythonw" (PATH), ou chemin absolu entre guillemets,
 ;; ex. "C:/Python312/pythonw.exe". Priorite a AutoCADGemini.exe si present.
 (setq *AG-PYTHON* "pythonw")
