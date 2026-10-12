@@ -16,6 +16,8 @@ Pour accélérer réellement la génération distante, les pistes structurantes 
 
 Le flux ne doit pas attendre que Gemini termine aussi le texte qui accompagne le rendu. Il vérifie maintenant que l’image DOM a fini de charger et que son URL/dimensions sont stables sur deux observations, avec une limite de 3 secondes. Dès qu’elle est disponible, il lance l’extraction même si le bouton « stop » ou un indicateur de génération est encore visible. L’ancien contrôle pouvait retarder l’extraction de près de 30 secondes.
 
+Comme Gemini peut encore finaliser le texte après l’extraction rapide, une nouvelle demande attend maintenant la fin du tour précédent (au plus 60 s ; sinon elle est refusée sans envoi). Le résultat est choisi selon une source d’image absente de l’instantané pris juste avant l’envoi, plutôt que par simple décompte. En mode express, la zone est consommée une seule fois afin d’éviter de reprendre le même recadrage après avoir changé de plan.
+
 Une migration API nécessiterait une implémentation dédiée, une clé gérée hors du code source (par exemple variable d’environnement ou stockage de secrets local) et le choix explicite du modèle. Le cache actuel est volontairement indépendant du fournisseur et reste utilisable si le moteur de génération change.
 
 ## Cache local des rendus

@@ -13,6 +13,7 @@ import os
 import time
 import glob
 import base64
+import hashlib
 import shutil
 import subprocess
 import threading
@@ -25,6 +26,7 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.action_chains import ActionChains
 from render_cache import RenderCache
 from image_readiness import wait_image_ready
+from result_tracking import images_with_new_signatures
 
 try:
     import undetected_chromedriver as uc
@@ -292,6 +294,24 @@ class GeminiWebBot:
         except Exception:
             return False
 
+    def _composer_image_signature(self):
+        """Sources des aperçus d’image du compositeur, hors images des anciens tours."""
+        try:
+            values = self.driver.execute_script(
+                "var ed=null;"
+                "document.querySelectorAll(\"[contenteditable='true']\").forEach(function(e){"
+                " if(e.offsetWidth||e.offsetHeight) ed=e;});"
+                "if(!ed) return [];"
+                "var box=ed; for(var u=0;u<20&&box;u++){"
+                " var imgs=Array.from(box.querySelectorAll('img')).filter(function(i){"
+                "  var r=i.getBoundingClientRect(); return r.width>30&&r.height>30;});"
+                " if(imgs.length) return imgs.map(function(i){return (i.currentSrc||i.src||'')+'|'+(i.alt||'');});"
+                " box=box.parentElement; } return [];"
+            ) or []
+            return tuple(values)
+        except Exception:
+            return ()
+
     def _composer_buttons(self):
         """Boutons a proximite du champ de prompt (plus sur que toute la page)."""
         try:
@@ -338,7 +358,7 @@ class GeminiWebBot:
         self.log("boutons composer vus: %s" % (seen if seen else "aucun"))
         return None
 
-    def _try_send_to_inputs(self, image_path):
+    def _try_send_to_inputs(self, image_path, previous_signature):
         self._unhide_file_inputs()
         try:
             inputs = self.driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
@@ -347,17 +367,31 @@ class GeminiWebBot:
         for inp in inputs:
             try:
                 inp.send_keys(image_path)
-                time.sleep(1.2)
-                if self._is_image_attached():
-                    return True
+                deadline = time.monotonic() + 4.0
+                while time.monotonic() < deadline:
+                    current_signature = self._composer_image_signature()
+                    try:
+                        selected_names = self.driver.execute_script(
+                            "return Array.from(arguments[0].files || []).map(function(f){return f.name;});",
+                            inp,
+                        ) or []
+                    except Exception:
+                        selected_names = []
+                    exact_file_selected = os.path.basename(image_path) in selected_names
+                    new_preview = current_signature != previous_signature
+                    if ((exact_file_selected or new_preview) and self._is_image_attached()):
+                        return True
+                    time.sleep(0.2)
             except Exception as e:
                 self.log("input refuse: %s" % e)
-        return self._is_image_attached()
+        return False
 
-    def _upload_via_file_input(self, image_path):
+    def _upload_via_file_input(self, image_path, previous_signature=None):
         """Strategie 1: input direct, sinon menu + / upload, sinon echec."""
+        if previous_signature is None:
+            previous_signature = self._composer_image_signature()
         self._scan_file_inputs()
-        if self._try_send_to_inputs(image_path):
+        if self._try_send_to_inputs(image_path, previous_signature):
             self.log("Image jointe via input direct.")
             return True
 
@@ -369,7 +403,7 @@ class GeminiWebBot:
              "importer", "t\u00e9l\u00e9verser", "televerser", "parcourir", "browse"))
         if not opened:
             self.log("Bouton + / piece jointe introuvable.")
-            return self._is_image_attached()
+            return False
         self.log("menu ouvert via: %s" % opened[:80])
         time.sleep(1.2)
         # Cliquer l'option "Importer / Upload files" du menu deroulant
@@ -392,13 +426,15 @@ class GeminiWebBot:
         except Exception:
             pass
         self._scan_file_inputs()
-        if self._try_send_to_inputs(image_path):
+        if self._try_send_to_inputs(image_path, previous_signature):
             self.log("Image jointe via le menu.")
             return True
         return False
 
-    def _upload_via_clipboard(self, image_path):
+    def _upload_via_clipboard(self, image_path, previous_signature=None):
         """Strategie 2: image dans le presse-papiers puis Ctrl+V dans le prompt."""
+        if previous_signature is None:
+            previous_signature = self._composer_image_signature()
         try:
             import win32clipboard
             from PIL import Image
@@ -424,10 +460,13 @@ class GeminiWebBot:
             el.click()
             time.sleep(0.4)
             ActionChains(self.driver).key_down(Keys.CONTROL).send_keys("v").key_up(Keys.CONTROL).perform()
-            time.sleep(1.5)
-            if self._is_image_attached():
-                self.log("Image collee via presse-papiers.")
-                return True
+            deadline = time.monotonic() + 4.0
+            while time.monotonic() < deadline:
+                if (self._composer_image_signature() != previous_signature
+                        and self._is_image_attached()):
+                    self.log("Nouvelle image collee via presse-papiers.")
+                    return True
+                time.sleep(0.2)
             self.log("collage sans apercu detecte.")
             return False
         except Exception as e:
@@ -508,6 +547,18 @@ class GeminiWebBot:
         except Exception:
             return []
 
+    def _result_image_signature(self, image):
+        """Identifiant stable d’une image résultat, utilisé pour distinguer les tours."""
+        try:
+            return self.driver.execute_script(
+                "return arguments[0].currentSrc || arguments[0].src || '';", image
+            ) or ""
+        except Exception:
+            try:
+                return image.get_attribute("src") or ""
+            except Exception:
+                return ""
+
     def _is_generating(self):
         """Vrai si Gemini genere encore (bouton stop visible / spinner)."""
         try:
@@ -532,10 +583,12 @@ class GeminiWebBot:
             maxw = 1600
             if w > maxw:
                 img = img.resize((maxw, int(h * maxw / w)), Image.LANCZOS)
-            up = os.path.join(self.work_dir, "upload.jpg")
+            image_id = hashlib.sha256(img.tobytes()).hexdigest()[:12]
+            up = os.path.join(self.work_dir, "upload_%s.jpg" % image_id)
             img.save(up, "JPEG", quality=88, optimize=True)
             kb = os.path.getsize(up) // 1024
-            self.log("Image optimisee pour l'envoi (%dx%d, %d Ko)." % (img.size[0], img.size[1], kb))
+            self.log("Plan prêt pour upload #%s (%dx%d, %d Ko)." % (
+                image_id, img.size[0], img.size[1], kb))
             return up
         except Exception as e:
             self.log("Optimisation ignoree: %s" % e)
@@ -559,6 +612,7 @@ class GeminiWebBot:
         try:
             cache_key = self.render_cache.key_for(image_path, prompt)
             cached = self.render_cache.get(cache_key)
+            self.log("Empreinte plan + prompt : %s" % cache_key[:12])
         except OSError as e:
             self.log("Cache local indisponible, génération normale: %s" % e)
             cache_key, cached = None, None
@@ -574,18 +628,31 @@ class GeminiWebBot:
         if self.get_login_state() == "signin":
             return False, "Connectez-vous a Google dans la fenetre Gemini, puis relancez."
 
+        # L’extraction rapide peut se terminer avant que Gemini ait fini le texte
+        # de la réponse précédente. Ne pas envoyer une nouvelle image au milieu
+        # de ce tour, sinon son image tardive pourrait être prise pour le nouveau rendu.
+        if self._is_generating():
+            self.log("Gemini termine encore la réponse précédente; attente avant le nouveau plan...")
+            settle_deadline = time.monotonic() + 60.0
+            while self._is_generating() and time.monotonic() < settle_deadline:
+                time.sleep(0.3)
+            if self._is_generating():
+                return False, (
+                    "Gemini termine toujours le rendu précédent. Le nouveau plan n’a pas été envoyé; "
+                    "attendez la fin de la réponse puis relancez."
+                )
+
         with self._lock:
             self._busy = True
         try:
             before = self._snapshot_downloads()
-            before_count = len(self._get_result_images())
-
             self.log("Envoi du plan a Gemini...")
             up_path = self._prepare_upload(image_path)
-            sent = self._upload_via_file_input(up_path)
+            composer_before = self._composer_image_signature()
+            sent = self._upload_via_file_input(up_path, composer_before)
             if not sent:
                 self.log("Input file impossible, essai via presse-papiers (Ctrl+V)...")
-                sent = self._upload_via_clipboard(up_path)
+                sent = self._upload_via_clipboard(up_path, composer_before)
             if not sent:
                 raise RuntimeError(
                     "Impossible de joindre l'image. Dans Chrome : cliquez le '+' "
@@ -595,6 +662,12 @@ class GeminiWebBot:
 
             self.log("Saisie du prompt...")
             self._type_prompt(prompt)
+            # Snapshot juste avant l’envoi : une image tardive de l’ancien tour
+            # ne doit pas satisfaire le critère de résultat du nouveau tour.
+            before_signatures = {
+                self._result_image_signature(image)
+                for image in self._get_result_images()
+            }
             self.log("Envoi du prompt...")
             self._send()
 
@@ -604,8 +677,11 @@ class GeminiWebBot:
             waited = 0
             while time.time() < deadline:
                 imgs = self._get_result_images()
-                if len(imgs) > before_count:
-                    img_el = imgs[-1]
+                new_imgs = images_with_new_signatures(
+                    imgs, before_signatures, self._result_image_signature
+                )
+                if new_imgs:
+                    img_el = new_imgs[-1]
                     break
                 time.sleep(1.0)
                 waited += 1

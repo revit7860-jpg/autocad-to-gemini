@@ -55,6 +55,8 @@ Le cache local des rendus et le benchmark d'affichage AutoCAD sont décrits dans
    (ou commande `AIRENDERINS`).
    L'aperçu est préparé en arrière-plan avec un redimensionnement rapide et
    l'insertion AutoCAD ne bloque plus l'interface.
+   En mode **Rendu express**, la zone sélectionnée est consommée une seule fois :
+   le prochain rendu demande une nouvelle zone pour éviter de reprendre un ancien plan.
 
 ## Dossiers
 

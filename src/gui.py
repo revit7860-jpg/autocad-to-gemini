@@ -362,6 +362,9 @@ class RenderApp:
             ok, res = acad.capture_plan(self.plan_path, region=rect)
             self._bring_to_front()
         else:
+            # Une capture pleine vue invalide une ancienne sélection recadrée :
+            # ne pas réutiliser les coordonnées d'un autre plan/zoom ensuite.
+            self.last_region = None
             self.log("Capture du plan AutoCAD...")
             ok, res = acad.capture_plan(self.plan_path)
         if ok:
@@ -399,6 +402,9 @@ class RenderApp:
                 self._bring_to_front()
                 return
             self.last_region = rect
+        # La région est consommée par ce seul rendu. Au prochain Rendu express,
+        # l'utilisateur devra confirmer la zone au lieu de réutiliser un ancien plan.
+        self.last_region = None
         self._set_busy(True)
         try:
             self.root.iconify()  # l'utilisateur reste sur AutoCAD
