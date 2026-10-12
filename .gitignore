@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+*.exe
+ Lomax111@prov.com/
+.venv/
+venv/

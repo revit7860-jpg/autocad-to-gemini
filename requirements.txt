@@ -1,0 +1,15 @@
+# Obligatoire
+selenium>=4.15
+webdriver-manager>=4.0
+pyautogui>=0.9.54
+pygetwindow>=0.0.9
+pyperclip>=1.8
+pillow>=10.0
+numpy>=1.24
+
+# Recommande (meilleure furtivite / outils)
+undetected-chromedriver>=3.5
+
+# Optionnel : insertion du rendu via COM AutoCAD et detection d'icone
+pywin32>=306
+opencv-python>=4.8

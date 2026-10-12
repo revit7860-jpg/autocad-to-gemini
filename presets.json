@@ -1,0 +1,7 @@
+{
+  "Plan -> Rendu 3D realist (vue de dessus)": "Transforme ce plan d'architecte 2D en rendu 3D photorealiste vu de dessus (top-down). Respecte EXACTEMENT la disposition, les murs, les ouvertures et les proportions du plan. Materiaux realistes, eclairage naturel doux, ombres portees, mobilier credibil approximant les pieces, texture de sol par piece. Style architectural haut de gamme, ultra detaille, rendu 8k.",
+  "Plan -> Perspective aerienne": "Convertir ce plan d'architecte en vue 3D photorealiste en perspective aerienne (3/4). Conserver strictement la geometrie et l'agencement du plan. Ajouter murs, toiture/couverture selon le contexte, materiaux realistes, environnement (terrain, vegetation), lumiere de fin de journee, ombres douces, rendu architectural 8k.",
+  "Plan -> Rendu interieur (dollhouse)": "Transforme ce plan en rendu interieur photorealiste de type 'dollhouse' (plan coupe vu de dessus sans plafond). Reproduire fidelement la disposition des pieces et du mobilier. Materiaux realistes, eclairage interieur chaleureux, details de decoration, rendu architectural 8k.",
+  "Plan -> Coloration realiste (a plat)": "Colorise ce plan 2D en vue realiste a plat : sols par piece, murs remplis, mobilier, vegetation exterieure. Garder la lecture du plan (contours nets) tout en donnant une apparence de rendu photorealiste vu de dessus.",
+  "Plan -> Rendu aquarelle / croquis": "Transformer ce plan en illustration architecturale a l'aquarelle/croquis realiste, vues de dessus, avec ombres et textures legeres, style moodboard professionnel."
+}
