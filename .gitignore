@@ -3,6 +3,7 @@ __pycache__/
 *.exe
 *.rar
 *.zip
+presets.avant-renfort-*.json
  Lomax111@prov.com/
 .venv/
 venv/
