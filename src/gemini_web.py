@@ -24,6 +24,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.action_chains import ActionChains
 from render_cache import RenderCache
+from image_readiness import wait_image_ready
 
 try:
     import undetected_chromedriver as uc
@@ -616,17 +617,21 @@ class GeminiWebBot:
                                "Regardez la reponse dans Chrome : si Gemini a repondu "
                                "par du texte (limite de generation ?), aucun rendu ne viendra.")
 
-            # Attendre la fin complete (le bouton stop disparait), puis prendre la derniere image
-            self.log("Image apparue, attente de la finalisation...")
-            end2 = time.time() + 30
-            while time.time() < end2 and self._is_generating():
-                time.sleep(0.5)
-            time.sleep(0.5)
+            # Ne pas attendre la fin de toute la réponse Gemini : elle peut
+            # continuer à écrire du texte longtemps après que le PNG soit prêt.
+            self.log("Image apparue, vérification rapide de son chargement...")
+            ready, image_state = wait_image_ready(self.driver, img_el, timeout=3.0)
+            if not ready or not image_state:
+                # Image paresseuse (lazy-load) ou complete=false : on extrait
+                # quand meme, le screenshot d'element marche dans tous les cas.
+                self.log("Image pas encore stabilisee, extraction quand meme.")
+                image_state = {"width": 0, "height": 0}
             imgs = self._get_result_images()
             if imgs:
                 img_el = imgs[-1]
 
-            self.log("Rendu detecte. Telechargement...")
+            self.log("Image prête (%dx%d). Extraction immédiate..." % (
+                image_state["width"], image_state["height"]))
             saved = self._extract_image(img_el, before)
             if not saved:
                 return False, "Rendu detecte mais extraction impossible."

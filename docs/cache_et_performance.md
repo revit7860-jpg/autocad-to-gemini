@@ -12,6 +12,10 @@ Pour accélérer réellement la génération distante, les pistes structurantes 
 4. Réutiliser une session déjà ouverte et éviter une nouvelle génération si l’entrée et la consigne sont identiques. Le cache local décrit ci-dessous couvre ce dernier cas.
 5. Mesurer séparément upload, attente de génération, extraction et affichage, au lieu d’optimiser à l’aveugle.
 
+### Après apparition de l’image
+
+Le flux ne doit pas attendre que Gemini termine aussi le texte qui accompagne le rendu. Il vérifie maintenant que l’image DOM a fini de charger et que son URL/dimensions sont stables sur deux observations, avec une limite de 3 secondes. Dès qu’elle est disponible, il lance l’extraction même si le bouton « stop » ou un indicateur de génération est encore visible. L’ancien contrôle pouvait retarder l’extraction de près de 30 secondes.
+
 Une migration API nécessiterait une implémentation dédiée, une clé gérée hors du code source (par exemple variable d’environnement ou stockage de secrets local) et le choix explicite du modèle. Le cache actuel est volontairement indépendant du fournisseur et reste utilisable si le moteur de génération change.
 
 ## Cache local des rendus
