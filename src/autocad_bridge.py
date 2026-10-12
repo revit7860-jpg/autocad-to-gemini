@@ -3,6 +3,7 @@ Pont AutoCAD : capture la zone de dessin et reinsere le rendu dans le dessin.
 """
 import os
 import time
+import math
 
 try:
     import pygetwindow as gw
@@ -110,11 +111,11 @@ def _acad_com():
 
 def insert_render(render_path, scale=None, x=0.0, y=0.0, zoom=False):
     try:
-        s = float(scale) if scale else 1.0
+        s = float(scale) if scale is not None else 1.0
     except (TypeError, ValueError):
-        s = 1.0
-    if s <= 0:
-        s = 1.0
+        return False, "Echelle invalide : utilisez un nombre strictement positif."
+    if not math.isfinite(s) or s <= 0:
+        return False, "Echelle invalide : utilisez un nombre strictement positif."
     app = _acad_com()
     if app is not None:
         try:
@@ -142,7 +143,9 @@ def insert_render(render_path, scale=None, x=0.0, y=0.0, zoom=False):
                 pass
             time.sleep(0.6)
             import pyperclip
-            cmd = "_.-IMAGEATTACH\n%s\n%s,%s\n1\n0\n" % (render_path.replace("\\", "/"), x, y)
+            # Même facteur d'échelle que pour COM ; format indépendant de la locale.
+            cmd = "_.-IMAGEATTACH\n%s\n%s,%s\n%s\n0\n" % (
+                render_path.replace("\\", "/"), x, y, format(s, ".12g"))
             pyperclip.copy(cmd)
             pyautogui.hotkey("ctrl", "v")
             pyautogui.press("enter")

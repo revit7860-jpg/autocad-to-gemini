@@ -116,14 +116,16 @@ class GeminiWebBot:
 
     # ------------------------------------------------------------------ browser
     def is_browser_open(self):
-        try:
-            if self.driver is None:
+        # Toute lecture ou mutation de self.driver est protégée par le même verrou.
+        with self._driver_lock:
+            try:
+                if self.driver is None:
+                    return False
+                _ = self.driver.current_url
+                return True
+            except Exception:
+                self.driver = None
                 return False
-            _ = self.driver.current_url
-            return True
-        except Exception:
-            self.driver = None
-            return False
 
     def _selenium_driver(self):
         opts = Options()
@@ -200,16 +202,28 @@ class GeminiWebBot:
         self.log("Navigateur ferme.")
 
     def get_login_state(self):
-        if not self.is_browser_open():
-            return "closed"
+        # Appelé périodiquement par Tk : ne jamais bloquer l'interface pendant
+        # une génération longue ou le lancement/la fermeture du navigateur.
         if self._busy:
             return "ok"
+        if not self._driver_lock.acquire(blocking=False):
+            return "loading"
         try:
-            with self._driver_lock:
-                state = self.driver.execute_script(_JS_LOGIN_STATE)
+            if self.driver is None:
+                return "closed"
+            try:
+                _ = self.driver.current_url
+            except Exception:
+                self.driver = None
+                return "closed"
+            if self._busy:
+                return "ok"
+            state = self.driver.execute_script(_JS_LOGIN_STATE)
             return state or "loading"
         except Exception:
             return "loading"
+        finally:
+            self._driver_lock.release()
 
     def is_signed_in(self):
         return self.get_login_state() == "ok"
@@ -525,6 +539,15 @@ class GeminiWebBot:
             return image_path
 
     def upload_plan_and_generate(self, image_path, prompt, out_path, timeout=420):
+        """Exécute une génération exclusive ; refuse une opération déjà active."""
+        if not self._driver_lock.acquire(blocking=False):
+            return False, "Une opération Gemini est déjà en cours. Réessayez ensuite."
+        try:
+            return self._upload_plan_and_generate_locked(image_path, prompt, out_path, timeout)
+        finally:
+            self._driver_lock.release()
+
+    def _upload_plan_and_generate_locked(self, image_path, prompt, out_path, timeout=420):
         """Envoie plan+prompt a Gemini, attend la generation, sauvegarde le rendu."""
         if not os.path.isfile(image_path):
             return False, "Image introuvable: %s" % image_path

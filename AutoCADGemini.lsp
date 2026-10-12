@@ -16,6 +16,8 @@
 ;; Interpreteur Python : "pythonw" (PATH), ou chemin absolu entre guillemets,
 ;; ex. "C:/Python312/pythonw.exe". Priorite a AutoCADGemini.exe si present.
 (setq *AG-PYTHON* "pythonw")
+;; Facteur d'insertion utilisé par la commande de secours AIRENDERINS.
+(setq *AG-INSERT-SCALE* 1.0)
 
 ;; Dossier de travail partage avec l'application
 (defun ag:work ( )
@@ -52,12 +54,14 @@
 )
 
 ;; Insertion de secours depuis AutoCAD (si l'appli n'est pas utilisee)
-(defun c:AIRENDERINS ( / img )
+(defun c:AIRENDERINS ( / img scale )
   (setq img (strcat (ag:work) "\\render.png"))
+  (setq scale (if (and (numberp *AG-INSERT-SCALE*) (> *AG-INSERT-SCALE* 0.0))
+                *AG-INSERT-SCALE* 1.0))
   (if (findfile img)
     (progn
-      (command "_.-IMAGEATTACH" img "0,0" 1 0)
-      (princ "\nRendu insere dans le dessin."))
+      (command "_.-IMAGEATTACH" img "0,0" scale 0)
+      (princ (strcat "\nRendu insere dans le dessin (echelle " (rtos scale 2 4) ").")))
     (princ "\nAucun rendu trouve. Generez-le d'abord avec GEMINI."))
   (princ)
 )

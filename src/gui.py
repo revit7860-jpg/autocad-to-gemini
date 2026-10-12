@@ -2,6 +2,7 @@
 
 import os
 import json
+import math
 import time
 import shutil
 import threading
@@ -59,8 +60,10 @@ class RenderApp:
         self.bot = GeminiWebBot(profile_dir(), self.work, logger=self.log_main)
         self.presets = self._load_presets()
         self._busy = False
+        self._closing = False
         self.last_region = None
         self.var_manual = tk.BooleanVar(value=False)
+        self.var_insert_scale = tk.StringVar(value="1.0")
         self._photo_plan = None
         self._photo_render = None
 
@@ -82,16 +85,24 @@ class RenderApp:
         self._warmup_browser()
 
     def on_close(self):
-        """Fermeture propre : libere le navigateur ET le verrou single-instance."""
-        try:
-            self.bot.close_browser()
-        except Exception:
-            pass
-        try:
-            self.root.destroy()
-        except Exception:
-            pass
-        os._exit(0)
+        """Attend la fin des opérations Selenium puis ferme Tk sans tuer le processus."""
+        if self._closing:
+            return
+        self._closing = True
+        self._set_busy(True)
+        self.log("Fermeture en cours : attente de la fin des opérations navigateur...")
+
+        def shutdown():
+            try:
+                self.bot.close_browser()  # attend le verrou si une génération est active
+            except Exception as e:
+                self.log_main("Fermeture du navigateur : %s" % e)
+            try:
+                self.root.after(0, self.root.destroy)
+            except Exception:
+                pass
+
+        threading.Thread(target=shutdown, name="autocadgemini-shutdown", daemon=False).start()
 
     def _warmup_browser(self):
         """Pre-ouvre Chrome/Gemini en tache de fond pour supprimer l'etape 2."""
@@ -186,6 +197,9 @@ class RenderApp:
         self.btn_gen.pack(side="left", padx=6)
         self.btn_ins = ttk.Button(bf, text="Inserer", command=self.do_insert)
         self.btn_ins.pack(side="left", padx=6)
+        ttk.Label(bf, text="Échelle :").pack(side="left", padx=(8, 2))
+        self.entry_insert_scale = ttk.Entry(bf, textvariable=self.var_insert_scale, width=7)
+        self.entry_insert_scale.pack(side="left", padx=2)
         ttk.Checkbutton(bf, text="Selection manuelle", variable=self.var_manual).pack(side="left", padx=6)
         ttk.Button(bf, text="Dossier de travail", command=self.open_folder).pack(side="right")
 
@@ -224,10 +238,23 @@ class RenderApp:
         self.root.after(0, lambda: self.log(msg))
 
     def _set_busy(self, busy):
-        self._busy = busy
-        state = "disabled" if busy else "normal"
+        self._busy = bool(busy) or self._closing
+        state = "disabled" if self._busy else "normal"
         for b in (self.btn_capture, self.btn_open, self.btn_gen, self.btn_ins, self.btn_express):
             b.config(state=state)
+        self.entry_insert_scale.config(state="disabled" if busy else "normal")
+
+    def _get_insert_scale(self):
+        """Lit et valide l'échelle avant tout travail d'insertion."""
+        try:
+            scale = float(self.var_insert_scale.get().strip().replace(",", "."))
+        except (TypeError, ValueError):
+            messagebox.showwarning("Échelle invalide", "Saisissez un nombre strictement positif.")
+            return None
+        if not math.isfinite(scale) or scale <= 0:
+            messagebox.showwarning("Échelle invalide", "Saisissez un nombre strictement positif.")
+            return None
+        return scale
 
     def _show_image(self, path, attr):
         if Image is None or not os.path.isfile(path):
@@ -287,6 +314,9 @@ class RenderApp:
         if not prompt:
             messagebox.showwarning("Prompt vide", "Saisissez un prompt.")
             return
+        scale = self._get_insert_scale()
+        if scale is None:
+            return
         # Etape 1 (thread principal) : choix de la zone
         rect = self.last_region
         if self.var_manual.get() or not rect:
@@ -310,9 +340,9 @@ class RenderApp:
             self.root.iconify()  # l'utilisateur reste sur AutoCAD
         except Exception:
             pass
-        threading.Thread(target=lambda: self._express_run(rect, prompt), daemon=True).start()
+        threading.Thread(target=lambda: self._express_run(rect, prompt, scale), daemon=True).start()
 
-    def _express_run(self, rect, prompt):
+    def _express_run(self, rect, prompt, scale):
         try:
             ok, res = acad.capture_plan(self.plan_path, region=rect, focus=False)
             if not ok:
@@ -330,7 +360,7 @@ class RenderApp:
                 self.log_main("Echec: %s" % res)
                 return
             self.root.after(0, lambda: self._show_image(self.render_path, "_photo_render"))
-            ok2, msg2 = acad.insert_render(self.render_path)
+            ok2, msg2 = acad.insert_render(self.render_path, scale=scale)
             self.log_main(msg2)
             self.log_main("Rendu express termine : le rendu est dans votre dessin.")
         finally:
@@ -375,20 +405,23 @@ class RenderApp:
         if not prompt:
             messagebox.showwarning("Prompt vide", "Saisissez un prompt.")
             return
+        scale = self._get_insert_scale()
+        if scale is None:
+            return
         self._set_busy(True)
         self.log("Generation du rendu aupres de Gemini...")
         def run():
             ok, res = self.bot.upload_plan_and_generate(self.plan_path, prompt, self.render_path)
-            self.root.after(0, lambda: self._on_gen_done(ok, res))
+            self.root.after(0, lambda: self._on_gen_done(ok, res, scale))
         threading.Thread(target=run, daemon=True).start()
 
-    def _on_gen_done(self, ok, res):
+    def _on_gen_done(self, ok, res, scale):
         self._set_busy(False)
         if ok:
             self.log("Rendu genere: %s" % res)
             self._show_image(self.render_path, "_photo_render")
             try:
-                ok2, msg2 = acad.insert_render(self.render_path)
+                ok2, msg2 = acad.insert_render(self.render_path, scale=scale)
                 self.log(msg2)
             except Exception as e:
                 self.log("Insertion impossible: %s" % e)
@@ -403,7 +436,10 @@ class RenderApp:
         if not os.path.isfile(self.render_path):
             messagebox.showwarning("Rendu manquant", "Generez d'abord un rendu.")
             return
-        ok, msg = acad.insert_render(self.render_path)
+        scale = self._get_insert_scale()
+        if scale is None:
+            return
+        ok, msg = acad.insert_render(self.render_path, scale=scale)
         self.log(msg)
 
     # ------------------------------------------------------------------ monitor
