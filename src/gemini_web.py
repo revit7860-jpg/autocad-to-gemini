@@ -110,6 +110,7 @@ class GeminiWebBot:
         self.driver = None
         self._busy = False
         self._lock = threading.Lock()
+        self._driver_lock = threading.RLock()  # serialize tous les acces WebDriver
         os.makedirs(self.profile_dir, exist_ok=True)
         os.makedirs(self.download_dir, exist_ok=True)
 
@@ -151,8 +152,6 @@ class GeminiWebBot:
         return uc.Chrome(options=opts)
 
     def _new_driver(self):
-        # Nettoie les chromedriver zombies qui bloquent les lancements suivants
-        kill_old_browsers()
         # Selenium standard d'abord : rapide et versionne avec Chrome installe
         try:
             self.log("Lancement de Chrome (Selenium)...")
@@ -168,33 +167,36 @@ class GeminiWebBot:
         raise RuntimeError("Impossible de demarrer Chrome (voir messages ci-dessus).")
 
     def launch_browser(self):
-        if self.is_browser_open():
-            self.log("Le navigateur Gemini est deja ouvert.")
-            return True
-        try:
-            self.driver = self._new_driver()
+        # Idempotent et protege : deux ouvertures concurrentes = un seul driver.
+        with self._driver_lock:
+            if self.is_browser_open():
+                self.log("Le navigateur Gemini est deja ouvert.")
+                return True
             try:
-                self.driver.execute_cdp_cmd(
-                    "Page.setDownloadBehavior",
-                    {"behavior": "allow", "downloadPath": self.download_dir},
-                )
-            except Exception:
-                pass
-            self.driver.get(GEMINI_URL)
-            self.log("Gemini ouvert: %s" % GEMINI_URL)
-            return True
-        except Exception as e:
-            self.log("Echec du lancement de Chrome: %s" % e)
-            self.driver = None
-            return False
+                self.driver = self._new_driver()
+                try:
+                    self.driver.execute_cdp_cmd(
+                        "Page.setDownloadBehavior",
+                        {"behavior": "allow", "downloadPath": self.download_dir},
+                    )
+                except Exception:
+                    pass
+                self.driver.get(GEMINI_URL)
+                self.log("Gemini ouvert: %s" % GEMINI_URL)
+                return True
+            except Exception as e:
+                self.log("Echec du lancement de Chrome: %s" % e)
+                self.driver = None
+                return False
 
     def close_browser(self):
-        try:
-            if self.driver:
-                self.driver.quit()
-        except Exception:
-            pass
-        self.driver = None
+        with self._driver_lock:
+            try:
+                if self.driver:
+                    self.driver.quit()
+            except Exception:
+                pass
+            self.driver = None
         self.log("Navigateur ferme.")
 
     def get_login_state(self):
@@ -203,7 +205,8 @@ class GeminiWebBot:
         if self._busy:
             return "ok"
         try:
-            state = self.driver.execute_script(_JS_LOGIN_STATE)
+            with self._driver_lock:
+                state = self.driver.execute_script(_JS_LOGIN_STATE)
             return state or "loading"
         except Exception:
             return "loading"
@@ -447,8 +450,10 @@ class GeminiWebBot:
             el.send_keys(Keys.ENTER)
 
     def _snapshot_downloads(self):
+        # Chrome telecharge dans download_dir (Page.setDownloadBehavior) : ne
+        # scanner QUE ce dossier pour ne pas confondre avec d'autres telechargements.
         files = set()
-        for d in (self.download_dir, os.path.expanduser("~/Downloads")):
+        for d in (self.download_dir,):
             if os.path.isdir(d):
                 for f in glob.glob(os.path.join(d, "*")):
                     files.add(f)
@@ -457,7 +462,7 @@ class GeminiWebBot:
     def _wait_new_image(self, before, timeout=120):
         end = time.time() + timeout
         while time.time() < end:
-            for d in (self.download_dir, os.path.expanduser("~/Downloads")):
+            for d in (self.download_dir,):
                 if not os.path.isdir(d):
                     continue
                 for f in glob.glob(os.path.join(d, "*")):

@@ -1,6 +1,8 @@
 __pycache__/
 *.py[cod]
 *.exe
+*.rar
+*.zip
  Lomax111@prov.com/
 .venv/
 venv/

@@ -10,8 +10,12 @@
 
 (vl-load-com)
 
-;; Dossier de l'application (chemin absolu, slashes /)
-(setq *AG-ROOT* "C:/Users/PROMOTECH/Downloads/script gemini to 3dsmax/AutoCADGemini")
+;; Dossier de l'application : resolu via findfile (voir ag:dir).
+;; Repli manuel si findfile echoue : renseignez votre chemin ici (slashes /).
+(setq *AG-ROOT* "")
+;; Interpreteur Python : "pythonw" (PATH), ou chemin absolu entre guillemets,
+;; ex. "C:/Python312/pythonw.exe". Priorite a AutoCADGemini.exe si present.
+(setq *AG-PYTHON* "pythonw")
 
 ;; Dossier de travail partage avec l'application
 (defun ag:work ( )
@@ -35,8 +39,9 @@
     ((and (/= dir "") (findfile exe))
      (startapp "cmd.exe" (strcat "/c start \"\" \"" exe "\"")))
     ((and (/= dir "") (findfile py))
-     (startapp "cmd.exe" (strcat "/c start \"\" pythonw \"" py "\"")))
-    (t (princ (strcat "\nAutoCADGemini : application introuvable dans [" dir "]."))))
+     (startapp "cmd.exe" (strcat "/c start \"\" \"" *AG-PYTHON* "\" \"" py "\"")))
+    (t (princ (strcat "\nAutoCADGemini : application introuvable dans [" dir "]."
+                      "\nVerifiez *AG-ROOT* / *AG-PYTHON* en tete du LISP."))))
   (princ)
 )
 

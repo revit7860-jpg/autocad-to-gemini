@@ -108,7 +108,13 @@ def _acad_com():
         return None
 
 
-def insert_render(render_path, scale=None, x=0.0, y=0.0):
+def insert_render(render_path, scale=None, x=0.0, y=0.0, zoom=False):
+    try:
+        s = float(scale) if scale else 1.0
+    except (TypeError, ValueError):
+        s = 1.0
+    if s <= 0:
+        s = 1.0
     app = _acad_com()
     if app is not None:
         try:
@@ -116,12 +122,13 @@ def insert_render(render_path, scale=None, x=0.0, y=0.0):
             import win32com.client as win32
             doc = app.ActiveDocument
             vt = win32.VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_R8, (float(x), float(y), 0.0))
-            doc.ModelSpace.AddRaster(render_path, vt, 0.0, 0.0)
-            try:
-                doc.Application.ZoomExtents()
-            except Exception:
-                pass
-            return True, "Rendu insere (COM AddRaster)."
+            doc.ModelSpace.AddRaster(render_path, vt, s, 0.0)
+            if zoom:
+                try:
+                    doc.Application.ZoomExtents()
+                except Exception:
+                    pass
+            return True, "Rendu insere (COM AddRaster, echelle %s)." % s
         except Exception as e:
             return False, "COM AddRaster echoue: %s" % e
     win = find_autocad_window()

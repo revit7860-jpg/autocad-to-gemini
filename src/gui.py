@@ -15,7 +15,7 @@ except Exception:
 
 import autocad_bridge as acad
 import region_picker as picker
-from gemini_web import GeminiWebBot, kill_old_browsers
+from gemini_web import GeminiWebBot
 
 BG_DARK = "#1e1e24"
 BG_CARD = "#2b2b36"
@@ -348,6 +348,9 @@ class RenderApp:
             pass
 
     def do_open(self):
+        if self._busy:
+            self.log("Operation en cours, patientez...")
+            return
         self._set_busy(True)
         def run():
             ok = self.bot.launch_browser()
@@ -362,6 +365,9 @@ class RenderApp:
         threading.Thread(target=run, daemon=True).start()
 
     def do_generate(self):
+        if self._busy:
+            self.log("Operation en cours, patientez...")
+            return
         prompt = self.txt_prompt.get("1.0", "end").strip()
         if not os.path.isfile(self.plan_path):
             messagebox.showwarning("Plan manquant", "Capturez d'abord le plan AutoCAD.")
