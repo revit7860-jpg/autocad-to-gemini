@@ -615,7 +615,15 @@ class GeminiWebBot:
                 return False, "Rendu detecte mais extraction impossible."
 
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
-            shutil.copy2(saved, out_path)
+            try:
+                shutil.copy2(saved, out_path)
+            except OSError:
+                # out_path verrouille (ex. reference raster ouverte dans AutoCAD) :
+                # on sauve sous un nom unique au lieu d'echouer (WinError 32).
+                alt = os.path.join(self.work_dir, "render_%d.png" % int(time.time()))
+                shutil.copy2(saved, alt)
+                self.log("Rendu principal verrouille, rendu sauve sous %s" % os.path.basename(alt))
+                return True, alt
             self.log("Rendu enregistre: %s" % out_path)
             return True, out_path
         except Exception as e:

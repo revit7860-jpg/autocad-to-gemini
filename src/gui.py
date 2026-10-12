@@ -257,6 +257,45 @@ class RenderApp:
             return None
         return scale
 
+    def _prune_inserts(self, keep=5):
+        """Supprime les anciennes copies horodates (best effort)."""
+        try:
+            files = [os.path.join(self.work, f) for f in os.listdir(self.work)
+                     if f.startswith("render_") and f.endswith(".png")]
+            files = sorted(files, key=lambda p: os.path.getmtime(p))
+            if len(files) > keep:
+                for old in files[:-keep]:
+                    try:
+                        os.remove(old)
+                    except OSError:
+                        pass  # encore verrouille par AutoCAD : on le garde
+        except Exception:
+            pass
+
+    def _insertable_copy(self, src):
+        """Copie horodatee de src pour insertion.
+
+        AutoCAD verrouille le fichier raster insere : on n'insere jamais
+        render.png directement, sinon la generation suivante echoue (WinError 32).
+        Retourne (chemin, erreur_ou_None)."""
+        try:
+            if not os.path.isfile(src):
+                return src, None
+            stamp = time.strftime("%Y%m%d_%H%M%S")
+            base = os.path.join(self.work, "render_%s" % stamp)
+            dest = base + ".png"
+            n = 1
+            while os.path.exists(dest):
+                n += 1
+                dest = "%s_%d.png" % (base, n)
+            if os.path.abspath(dest) == os.path.abspath(src):
+                return src, None
+            shutil.copy2(src, dest)
+            self._prune_inserts()
+            return dest, None
+        except Exception as e:
+            return src, "Copie insertion impossible (%s), insertion directe." % e
+
     def _show_image(self, path, attr):
         if Image is None or not os.path.isfile(path):
             return
@@ -384,8 +423,12 @@ class RenderApp:
             if not ok:
                 self.log_main("Echec: %s" % res)
                 return
-            self.root.after(0, lambda: self._show_image(self.render_path, "_photo_render"))
-            ok2, msg2 = acad.insert_render(self.render_path, scale=scale)
+            final = res if isinstance(res, str) and os.path.isfile(res) else self.render_path
+            self.root.after(0, lambda: self._show_image(final, "_photo_render"))
+            ins_path, copy_err = self._insertable_copy(final)
+            if copy_err:
+                self.log_main(copy_err)
+            ok2, msg2 = acad.insert_render(ins_path, scale=scale)
             self.log_main(msg2)
             self.log_main("Rendu express termine : le rendu est dans votre dessin.")
         finally:
@@ -449,11 +492,15 @@ class RenderApp:
         # Afficher l'aperçu dès que le fichier est prêt. La lecture/redimension
         # et l'insertion AutoCAD s'effectuent hors du thread Tk.
         self.log("Rendu prêt : affichage de l'aperçu et insertion dans AutoCAD...")
-        self._show_image(self.render_path, "_photo_render")
+        final = res if isinstance(res, str) and os.path.isfile(res) else self.render_path
+        self._show_image(final, "_photo_render")
 
-        def insert_in_background():
+        def insert_in_background(path=final):
+            ins_path, copy_err = self._insertable_copy(path)
+            if copy_err:
+                self.log_main(copy_err)
             try:
-                ok2, msg2 = acad.insert_render(self.render_path, scale=scale)
+                ok2, msg2 = acad.insert_render(ins_path, scale=scale)
             except Exception as e:
                 ok2, msg2 = False, "Insertion impossible: %s" % e
             try:
@@ -483,8 +530,11 @@ class RenderApp:
         self._set_busy(True)
 
         def run():
+            ins_path, copy_err = self._insertable_copy(self.render_path)
+            if copy_err:
+                self.log_main(copy_err)
             try:
-                ok, msg = acad.insert_render(self.render_path, scale=scale)
+                ok, msg = acad.insert_render(ins_path, scale=scale)
                 acad.ensure_visible()
             except Exception as e:
                 ok, msg = False, "Insertion impossible: %s" % e
