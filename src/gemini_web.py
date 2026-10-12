@@ -23,6 +23,7 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.action_chains import ActionChains
+from render_cache import RenderCache
 
 try:
     import undetected_chromedriver as uc
@@ -106,6 +107,7 @@ class GeminiWebBot:
         self.profile_dir = profile_dir
         self.work_dir = work_dir
         self.download_dir = os.path.join(work_dir, "downloads")
+        self.render_cache = RenderCache(os.path.join(work_dir, "render_cache"))
         self.log = logger
         self.driver = None
         self._busy = False
@@ -551,6 +553,21 @@ class GeminiWebBot:
         """Envoie plan+prompt a Gemini, attend la generation, sauvegarde le rendu."""
         if not os.path.isfile(image_path):
             return False, "Image introuvable: %s" % image_path
+
+        # Un cache hit évite Chrome, l'upload et la génération distante.
+        try:
+            cache_key = self.render_cache.key_for(image_path, prompt)
+            cached = self.render_cache.get(cache_key)
+        except OSError as e:
+            self.log("Cache local indisponible, génération normale: %s" % e)
+            cache_key, cached = None, None
+        if cached:
+            ok, result = self._copy_result(cached, out_path)
+            if ok:
+                self.log("Rendu retrouvé dans le cache local : Gemini non sollicité.")
+                return True, result
+            self.log("Lecture du cache impossible, génération normale: %s" % result)
+
         if not self.is_browser_open():
             return False, "Navigateur non ouvert. Cliquez 'Ouvrir Gemini'."
         if self.get_login_state() == "signin":
@@ -614,23 +631,38 @@ class GeminiWebBot:
             if not saved:
                 return False, "Rendu detecte mais extraction impossible."
 
-            os.makedirs(os.path.dirname(out_path), exist_ok=True)
-            try:
-                shutil.copy2(saved, out_path)
-            except OSError:
-                # out_path verrouille (ex. reference raster ouverte dans AutoCAD) :
-                # on sauve sous un nom unique au lieu d'echouer (WinError 32).
-                alt = os.path.join(self.work_dir, "render_%d.png" % int(time.time()))
-                shutil.copy2(saved, alt)
-                self.log("Rendu principal verrouille, rendu sauve sous %s" % os.path.basename(alt))
-                return True, alt
-            self.log("Rendu enregistre: %s" % out_path)
-            return True, out_path
+            if cache_key:
+                try:
+                    self.render_cache.put(cache_key, saved)
+                    self.log("Rendu mis en cache localement.")
+                except OSError as e:
+                    self.log("Écriture du cache ignorée: %s" % e)
+            return self._copy_result(saved, out_path)
         except Exception as e:
             return False, "Erreur Gemini: %s" % e
         finally:
             with self._lock:
                 self._busy = False
+
+    def _copy_result(self, source_path, out_path):
+        """Copie le rendu vers le chemin de travail ou un chemin alternatif si verrouillé."""
+        try:
+            os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+            if os.path.abspath(source_path) == os.path.abspath(out_path):
+                return True, out_path
+            shutil.copy2(source_path, out_path)
+            self.log("Rendu enregistre: %s" % out_path)
+            return True, out_path
+        except OSError:
+            # AutoCAD peut garder le raster de sortie ouvert/verrouillé.
+            stamp = "%d_%d" % (int(time.time()), threading.get_ident())
+            alt = os.path.join(self.work_dir, "render_%s.png" % stamp)
+            try:
+                shutil.copy2(source_path, alt)
+                self.log("Rendu principal verrouille, rendu sauve sous %s" % os.path.basename(alt))
+                return True, alt
+            except OSError as e:
+                return False, "Copie du rendu impossible: %s" % e
 
     def _extract_image(self, img_el, before):
         # 1) Canvas -> base64 : instantane, sans telechargement

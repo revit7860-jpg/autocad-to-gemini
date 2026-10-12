@@ -31,6 +31,9 @@ Meme principe que l'outil 3ds Max (`GeminiStudio`), adapte a AutoCAD.
 | `presets.json` | Prompts de rendu predefinis |
 | `requirements.txt` | Dependances Python |
 
+Le cache local des rendus et le benchmark d'affichage AutoCAD sont décrits dans
+[`docs/cache_et_performance.md`](docs/cache_et_performance.md).
+
 ## Installation
 
 1. Python 3.10+ puis :
